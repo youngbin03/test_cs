@@ -19,6 +19,8 @@ module CTRL (
     output reg        PCWrite, PCWriteCond,
     output reg [1:0]  PCSource,
     output reg        IorD, SignExtend, SavePC,
+    output reg        JR,              // JR 신호 추가
+    output reg        SaveOldPC,       // JAL을 위한 신호 추가
 
     output reg [2:0]  state          // 디버그(현재 FSM 상태)
 );
@@ -26,7 +28,8 @@ module CTRL (
 /*------------------------------------------------------------------
     8-state FSM : IF → ID → EX → MEM → WB …
     ⓐ  J / JAL  은  ID 단계에서   PCSource=2, PCWrite=1  로 즉시 점프
-    ⓑ  JAL 은   SavePC=1  으로 $ra ← PC+4  (WB_I 단계에서 수행)
+    ⓑ  JAL 은   SavePC=1, SaveOldPC=1로 oldPCplus4 ← PC+4 (WB_I 단계에서 수행)
+    ⓒ  JR 은   ID 단계에서 감지하고 PCWrite=1, JR=1로 즉시 점프
 ------------------------------------------------------------------*/
 
 /* ───── 상태 부호화 ───── */
@@ -46,7 +49,7 @@ always @(posedge clk or posedge rst)
 always @(*) begin
     /* 기본값 = 0 */
     {ALUOp,MemRead,MemWrite,IRWrite,RegDst,RegWrite,ALUSrcA,ALUSrcB,
-     MemtoReg,PCWrite,PCWriteCond,PCSource,IorD,SignExtend,SavePC} = 0;
+     MemtoReg,PCWrite,PCWriteCond,PCSource,IorD,SignExtend,SavePC,JR,SaveOldPC} = 0;
     next_state = state;
 
     case (state)
@@ -63,7 +66,15 @@ always @(*) begin
         ALUSrcB = 2'b11;
 
         case (opcode)
-            `OP_RTYPE           : next_state = EX_R;
+            `OP_RTYPE           : begin
+                if (funct == `FUNCT_JR) begin
+                    JR = 1;            // JR 신호 활성화
+                    PCWrite = 1;       // PC 즉시 갱신
+                    next_state = IF;   // ID에서 바로 IF로 이동
+                end else begin
+                    next_state = EX_R;
+                end
+            end
 
             `OP_LW, `OP_SW      : begin SignExtend=1; next_state = EX_I; end
             `OP_BEQ, `OP_BNE    : begin SignExtend=1; next_state = MEMR; end
@@ -72,7 +83,14 @@ always @(*) begin
             `OP_J,  `OP_JAL     : begin
                 PCSource = 2'b10;   // jump target
                 PCWrite  = 1;       // 즉시 PC 갱신
-                next_state = WB_I;  // JAL: $31 저장 / J: RegWrite=0
+                
+                if (opcode == `OP_JAL) begin
+                    SaveOldPC = 1;   // 원래 PC+4 값 저장 (CPU.v의 oldPCplus4에 저장됨)
+                    SavePC = 1;      // JAL은 $31에 PC+4 저장
+                    RegWrite = 1;    // $31에 쓰기 위해 필요
+                end
+                
+                next_state = IF;   // JAL: $31 저장 / J: RegWrite=0
             end
 
             // 논리-즉시형 : zero-extend

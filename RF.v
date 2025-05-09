@@ -33,8 +33,8 @@ module RF (
     always @(posedge clk) begin
         if (rst) begin
             // 리셋 시, 파일로부터 초기값 로드
-            // 파일 형태: 32줄의 HEX 값, 예) initial_reg.mem
-            $readmemh("initial_reg.mem", register_file);
+            // 파일 형태: 32줄의 HEX 값
+            $readmemh("reference_reg.mem", register_file);
         end
         else begin
             // RegWrite가 1이면 쓰기 수행
